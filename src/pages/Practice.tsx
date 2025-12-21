@@ -391,7 +391,7 @@ export default function PracticePage() {
               <option value="random">随机推荐</option>
               <option value="poem">唐诗宋词</option>
               <option value="tongue">绕口令</option>
-              <option value="sentence">童话短句</option>
+              <option value="sentence">课文短句</option>
               <option value="idiom">常用成语</option>
               <option value="classical">古文(小学)</option>
               <option value="mistake">错题练习</option>
