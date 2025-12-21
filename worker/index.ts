@@ -1,7 +1,7 @@
 import { pinyin } from "pinyin-pro";
 
 interface Env {
-  GEMINI_API_KEY: string;
+  GOOGLE_AI_STUDIO_TOKEN: string;
   GEMINI_MODEL_CHAT: string;
   NODE_ENV?: string;
 }
@@ -121,44 +121,51 @@ async function handleGenerate(request: Request, env: Env) {
           : "生成一句儿童童话短句，去除生僻字，长度10-20中文字。只输出文本，保留标点符号，不要包含其他解释。";
     }
 
-    if (!env.GEMINI_API_KEY) {
+    if (!env.GOOGLE_AI_STUDIO_TOKEN) {
       return Response.json({ content: pickLocal() });
     }
 
-    console.log("[Worker] GEMINI_API_KEY is present");
+    console.log("[Worker] GOOGLE_AI_STUDIO_TOKEN is present");
 
-    const baseUrl =
-      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    const ACCOUNT_ID = "6557015f49716345b2e62bcd3c3a9cd3";
+    const GATEWAY_NAME = "pinyin-app";
+    const MODEL = env.GEMINI_MODEL_CHAT || "gemini-2.5-flash";
+    const url = `https://gateway.ai.cloudflare.com/v1/${ACCOUNT_ID}/${GATEWAY_NAME}/google-ai-studio/v1/models/${MODEL}:generateContent`;
 
-    const requestPayload = {
-      model: env.GEMINI_MODEL_CHAT || "gemini-1.5-flash",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 1.0,
-      max_tokens: 1000,
-    };
-    console.log(
-      "[Worker] Gemini Request Payload:",
-      JSON.stringify(requestPayload)
-    );
-
-    const fetchOptions: any = {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${env.GEMINI_API_KEY}`,
+        "cf-aig-authorization": `Bearer ${env.GOOGLE_AI_STUDIO_TOKEN}`,
       },
-      body: JSON.stringify(requestPayload),
-    };
-
-    const response = await fetch(baseUrl, fetchOptions);
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+      }),
+    });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(
+        `[Worker] Gemini API error! status: ${response.status}, body: ${errorText}`
+      );
       return Response.json({ content: pickLocal() });
     }
 
     const data: any = await response.json();
-    console.log("[Worker] Gemini raw response:", JSON.stringify(data));
-    const text = data.choices?.[0]?.message?.content;
+    let text = "";
+    if (
+      data.candidates &&
+      data.candidates[0] &&
+      data.candidates[0].content &&
+      data.candidates[0].content.parts
+    ) {
+      text = data.candidates[0].content.parts.map((p: any) => p.text).join("");
+    }
 
     if (text) {
       const out = text.trim().replace(/\s+/g, "");
@@ -173,6 +180,7 @@ async function handleGenerate(request: Request, env: Env) {
 
     return Response.json({ content: pickLocal() });
   } catch (error) {
+    console.error("[Worker] Error:", error);
     return Response.json({ content: "生成失败，请稍后再试" });
   }
 }
