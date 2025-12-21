@@ -10,7 +10,7 @@ function App() {
       <div className="min-h-screen bg-gray-50 antialiased">
         <header className="border-b bg-white">
           <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div className="font-bold text-blue-600 text-xl">拼音大闯关</div>
+            <div className="font-bold text-blue-600 text-xl">拼音大冒险</div>
             <nav className="flex items-center gap-6 text-sm font-medium text-gray-600">
               <Link to="/" className="hover:text-blue-600 transition-colors">
                 练习
