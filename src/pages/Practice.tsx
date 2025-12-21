@@ -33,6 +33,8 @@ export default function PracticePage() {
   const [isReady, setIsReady] = useState(false);
   const ignoreNextFetch = useRef(false);
   const autoConfirmTimer = useRef<number | null>(null);
+  const contentQueue = useRef<string[]>([]);
+  const typeRef = useRef(ctype);
 
   const chars = useMemo(() => Array.from(text), [text]);
 
@@ -251,39 +253,92 @@ export default function PracticePage() {
     }
   };
 
+  const fetchContent = async (targetType: ContentType): Promise<string> => {
+    let mistakes: string[] = [];
+    if (targetType === "mistake") {
+      const list = loadMistakes();
+      mistakes = list
+        .sort((a, b) => b.count - a.count)
+        .map((m) => m.char)
+        .slice(0, 10);
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: targetType, mistakes }),
+    });
+    if (!response.ok) {
+      throw new Error("Fetch failed");
+    }
+    const data = await response.json();
+    return data.content;
+  };
+
+  const preloadContent = async () => {
+    if (contentQueue.current.length < 3) {
+      try {
+        const typeToFetch = typeRef.current;
+        const nextText = await fetchContent(typeToFetch);
+        if (typeRef.current !== typeToFetch) return;
+        if (nextText) contentQueue.current.push(nextText);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
   const refreshContent = async (typeOverride?: ContentType) => {
     const targetType = typeOverride || ctype;
+
+    if (contentQueue.current.length > 0) {
+      const nextText = contentQueue.current.shift();
+      if (nextText) {
+        setText(nextText);
+        if (nextText === text) {
+          resetGame(nextText);
+        }
+        if (
+          typeof window !== "undefined" &&
+          window.history &&
+          window.history.replaceState
+        ) {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("text")) {
+            url.searchParams.delete("text");
+            window.history.replaceState({}, "", url.toString());
+          }
+        }
+        preloadContent();
+        return;
+      }
+    }
+
     setLoadingGen(true);
     try {
-      let mistakes: string[] = [];
-      if (targetType === "mistake") {
-        const list = loadMistakes();
-        mistakes = list
-          .sort((a, b) => b.count - a.count)
-          .map((m) => m.char)
-          .slice(0, 10);
-      }
-      
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: targetType, mistakes }),
-      });
-      const data = await response.json();
-      setText(data.content);
-      
+      const content = await fetchContent(targetType);
+      setText(content);
+
       // Force reset if text is same, otherwise useEffect[text] will handle it
-      if (data.content === text) {
-        resetGame(data.content);
+      if (content === text) {
+        resetGame(content);
       }
 
-      if (typeof window !== "undefined" && window.history && window.history.replaceState) {
+      if (
+        typeof window !== "undefined" &&
+        window.history &&
+        window.history.replaceState
+      ) {
         const url = new URL(window.location.href);
         if (url.searchParams.has("text")) {
           url.searchParams.delete("text");
           window.history.replaceState({}, "", url.toString());
         }
       }
+      preloadContent();
+    } catch (e) {
+      console.error(e);
+      toast.error("生成失败，请重试");
     } finally {
       setLoadingGen(false);
     }
@@ -292,11 +347,18 @@ export default function PracticePage() {
   useEffect(() => {
     if (!isReady) return;
     localStorage.setItem("pinyin_ctype", ctype);
+    typeRef.current = ctype;
+
+    // Clear queue when type changes
+    contentQueue.current = [];
+
     if (ignoreNextFetch.current) {
       ignoreNextFetch.current = false;
+      setTimeout(() => preloadContent(), 1000);
       return;
     }
     refreshContent(ctype);
+    setTimeout(() => preloadContent(), 1000);
   }, [ctype, isReady]);
 
   return (
