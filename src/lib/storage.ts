@@ -42,3 +42,49 @@ export function addMistake(char: string, wrong: string, correct: string) {
 export function clearMistakes() {
   saveMistakes([]);
 }
+
+export type SessionStat = {
+  id: string;
+  startAt: number;
+  endAt: number;
+  durationSec: number;
+  typed: number;
+  correct: number;
+  wrong: number;
+  accuracy: number;
+};
+
+const SKEY = "pinyin_sessions";
+
+export function loadSessions(): SessionStat[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SKEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr;
+  } catch {
+    return [];
+  }
+}
+
+export function saveSessions(list: SessionStat[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SKEY, JSON.stringify(list));
+  } catch {}
+}
+
+export function addSession(stat: SessionStat) {
+  const list = loadSessions();
+  list.unshift(stat);
+  if (list.length > 100) {
+    list.splice(100);
+  }
+  saveSessions(list);
+}
+
+export function clearSessions() {
+  saveSessions([]);
+}

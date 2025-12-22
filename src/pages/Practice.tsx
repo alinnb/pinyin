@@ -3,7 +3,12 @@ import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
 import QwertyKeyboard from "../components/keyboard/QwertyKeyboard";
-import { addMistake, loadMistakes } from "../lib/storage";
+import {
+  addMistake,
+  loadMistakes,
+  addSession,
+  loadSessions,
+} from "../lib/storage";
 import {
   normalizeInput,
   getAcceptedPinyins,
@@ -31,10 +36,38 @@ export default function PracticePage() {
   const [ctype, setCtype] = useState<ContentType>("sentence");
   const [loadingGen, setLoadingGen] = useState<boolean>(false);
   const [isReady, setIsReady] = useState(false);
+  const [durationMin, setDurationMin] = useState<number>(10);
+  const [remainingSec, setRemainingSec] = useState<number>(0);
+  const [sessionActive, setSessionActive] = useState<boolean>(false);
+  const [lastSummary, setLastSummary] = useState<{
+    typed: number;
+    correct: number;
+    wrong: number;
+    accuracy: number;
+    durationSec: number;
+  } | null>(null);
+  const [sessionHistory, setSessionHistory] = useState<
+    {
+      id: string;
+      startAt: number;
+      endAt: number;
+      durationSec: number;
+      typed: number;
+      correct: number;
+      wrong: number;
+      accuracy: number;
+    }[]
+  >([]);
   const ignoreNextFetch = useRef(false);
   const autoConfirmTimer = useRef<number | null>(null);
   const contentQueue = useRef<string[]>([]);
   const typeRef = useRef(ctype);
+  const timerRef = useRef<number | null>(null);
+  const startAtRef = useRef<number | null>(null);
+  const endedRef = useRef<boolean>(false);
+  const typedRef = useRef<number>(0);
+  const correctRef = useRef<number>(0);
+  const wrongRef = useRef<number>(0);
 
   const chars = useMemo(() => Array.from(text), [text]);
 
@@ -95,6 +128,9 @@ export default function PracticePage() {
     return () => {
       if (autoConfirmTimer.current) {
         clearTimeout(autoConfirmTimer.current);
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
     };
   }, []);
@@ -192,6 +228,12 @@ export default function PracticePage() {
       checkAutoConfirm(nextBuffer);
     }
   };
+  const handleKeyWithSession = (
+    e: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent
+  ) => {
+    if (!sessionActive || remainingSec <= 0) return;
+    handleKey(e);
+  };
 
   const checkAutoConfirm = (currentBuffer: string) => {
     if (cursor >= chars.length) return;
@@ -223,6 +265,11 @@ export default function PracticePage() {
     const nextStatuses = [...statuses];
     nextStatuses[cursor] = ok ? "correct" : "wrong";
     setStatuses(nextStatuses);
+    if (sessionActive && isChinese(c)) {
+      typedRef.current += 1;
+      if (ok) correctRef.current += 1;
+      else wrongRef.current += 1;
+    }
     if (ok) {
       const final = getPrimaryPinyin(c);
       setAnswers((prev) => ({ ...prev, [cursor]: final }));
@@ -361,6 +408,131 @@ export default function PracticePage() {
     setTimeout(() => preloadContent(), 1000);
   }, [ctype, isReady]);
 
+  useEffect(() => {
+    try {
+      const list = loadSessions()
+        .slice()
+        .sort((a, b) => b.endAt - a.endAt);
+      const uniq = Array.from(
+        new Map(list.map((s) => [s.id, s])).values()
+      ).slice(0, 10);
+      setSessionHistory(uniq);
+    } catch {}
+  }, []);
+
+  const startSession = () => {
+    if (sessionActive) return;
+    resetGame(text);
+    setLastSummary(null);
+    setSessionActive(true);
+    endedRef.current = false;
+    typedRef.current = 0;
+    correctRef.current = 0;
+    wrongRef.current = 0;
+    const total = durationMin === 0 ? 10 : durationMin * 60;
+    setRemainingSec(total);
+    startAtRef.current = Date.now();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    timerRef.current = window.setInterval(() => {
+      setRemainingSec((prev) => {
+        const next = prev - 1;
+        if (next <= 0) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          endSession();
+          return 0;
+        }
+        return next;
+      });
+    }, 1000);
+  };
+
+  const endSession = () => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    setSessionActive(false);
+    const endAt = Date.now();
+    const durationSec = Math.max(
+      0,
+      startAtRef.current
+        ? Math.round((endAt - startAtRef.current) / 1000)
+        : durationMin * 60
+    );
+    let typed = 0;
+    let correct = 0;
+    let wrong = 0;
+    if (typedRef.current > 0) {
+      typed = typedRef.current;
+      correct = correctRef.current;
+      wrong = wrongRef.current;
+    } else {
+      statuses.forEach((s, idx) => {
+        if (isChinese(chars[idx]) && s !== "pending") {
+          typed++;
+          if (s === "correct") correct++;
+          if (s === "wrong") wrong++;
+        }
+      });
+    }
+    const acc = typed > 0 ? Math.round((correct / typed) * 100) : 100;
+    setLastSummary({
+      typed,
+      correct,
+      wrong,
+      accuracy: acc,
+      durationSec,
+    });
+
+    if (typed > 0) {
+      const stat = {
+        id: `${endAt}`,
+        startAt: startAtRef.current || endAt - durationSec * 1000,
+        endAt,
+        durationSec,
+        typed,
+        correct,
+        wrong,
+        accuracy: acc,
+      };
+      addSession(stat);
+      try {
+        const list = loadSessions()
+          .slice()
+          .sort((a, b) => b.endAt - a.endAt);
+        const uniq = Array.from(
+          new Map(list.map((s) => [s.id, s])).values()
+        ).slice(0, 10);
+        setSessionHistory(uniq);
+      } catch {}
+    }
+
+    toast.success("时间到");
+  };
+
+  const resetSession = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setSessionActive(false);
+    setRemainingSec(0);
+    setLastSummary(null);
+    resetGame(text);
+  };
+
+  const formatMMSS = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const mm = m.toString().padStart(2, "0");
+    const ss = s.toString().padStart(2, "0");
+    return `${mm}:${ss}`;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 py-6 px-4">
       <div className="max-w-4xl mx-auto space-y-4">
@@ -387,6 +559,7 @@ export default function PracticePage() {
                   );
                 }
               }}
+              disabled={sessionActive}
             >
               <option value="random">随机推荐</option>
               <option value="poem">唐诗宋词</option>
@@ -401,7 +574,7 @@ export default function PracticePage() {
               variant="outline"
               size="sm"
               onClick={() => refreshContent()}
-              disabled={loadingGen}
+              disabled={loadingGen || sessionActive}
               className="h-8"
             >
               {loadingGen ? (
@@ -422,6 +595,51 @@ export default function PracticePage() {
                 {accuracy}%
               </span>
             </div>
+
+            <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+
+            <div className="flex items-center gap-2">
+              <select
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-24"
+                value={durationMin}
+                onChange={(e) => setDurationMin(Number(e.target.value))}
+                disabled={sessionActive}
+              >
+                <option value={0}>10秒(测试)</option>
+                <option value={1}>1分钟</option>
+                <option value={3}>3分钟</option>
+                <option value={5}>5分钟</option>
+                <option value={10}>10分钟</option>
+                <option value={15}>15分钟</option>
+                <option value={20}>20分钟</option>
+                <option value={30}>30分钟</option>
+              </select>
+              {!sessionActive ? (
+                <Button size="sm" className="h-8" onClick={startSession}>
+                  开始
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8"
+                  onClick={endSession}
+                >
+                  结束
+                </Button>
+              )}
+              <div className="font-mono text-sm w-16 text-center">
+                {sessionActive ? formatMMSS(remainingSec) : "未开始"}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={resetSession}
+              >
+                重置
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -431,11 +649,68 @@ export default function PracticePage() {
           buffer={buffer}
           statuses={statuses}
           answers={answers}
-          onKeyDown={handleKey}
+          onKeyDown={handleKeyWithSession}
           onConfirm={confirmBuffer}
         />
-
         <QwertyKeyboard />
+
+        {!sessionActive && lastSummary && (
+          <div className="rounded-md border border-gray-200 bg-white p-4">
+            <div className="text-sm font-medium mb-2">本次统计</div>
+            <div className="flex flex-wrap items-center gap-4 text-sm">
+              <div>时长 {Math.round(lastSummary.durationSec / 60)} 分钟</div>
+              <div>输入 {lastSummary.typed}</div>
+              <div>
+                速度{" "}
+                {Math.round(
+                  (lastSummary.typed * 60) /
+                    Math.max(lastSummary.durationSec, 1)
+                )}
+                /分
+              </div>
+              <div className="text-green-700">正确 {lastSummary.correct}</div>
+              <div className="text-red-700">错误 {lastSummary.wrong}</div>
+              <div>
+                准确率{" "}
+                <span className="font-mono font-bold text-base text-blue-600">
+                  {lastSummary.accuracy}%
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {sessionHistory.length > 0 && (
+          <div className="rounded-md border border-gray-200 bg-white p-4">
+            <div className="text-sm font-medium mb-2">最近会话</div>
+            <div className="space-y-2">
+              {sessionHistory.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">
+                      {new Date(s.endAt).toLocaleString()}
+                    </span>
+                    <span>{Math.round(s.durationSec / 60)} 分钟</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span>输入 {s.typed}</span>
+                    <span>
+                      速{" "}
+                      {Math.round((s.typed * 60) / Math.max(s.durationSec, 1))}
+                      /分
+                    </span>
+                    <span className="text-green-700">正 {s.correct}</span>
+                    <span className="text-red-700">误 {s.wrong}</span>
+                    <span className="font-mono">{s.accuracy}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
