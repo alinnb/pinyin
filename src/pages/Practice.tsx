@@ -17,14 +17,13 @@ import {
 import { PracticeEngine } from "../components/practice/PracticeEngine";
 import type { Status } from "../components/practice/PracticeEngine";
 
-export type ContentType =
-  | "poem"
-  | "tongue"
-  | "sentence"
-  | "idiom"
-  | "mistake"
-  | "classical"
-  | "random";
+// Use string to support dynamic volumes
+export type ContentType = string;
+
+interface Volume {
+  id: string;
+  name: string;
+}
 
 export default function PracticePage() {
   const [text, setText] = useState<string>("小桥流水人家");
@@ -38,7 +37,9 @@ export default function PracticePage() {
   const [isReady, setIsReady] = useState(false);
   const [durationMin, setDurationMin] = useState<number>(10);
   const [remainingSec, setRemainingSec] = useState<number>(0);
+  const [lessonTitle, setLessonTitle] = useState<string>("");
   const [sessionActive, setSessionActive] = useState<boolean>(false);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
   const [lastSummary, setLastSummary] = useState<{
     typed: number;
     correct: number;
@@ -59,8 +60,7 @@ export default function PracticePage() {
     }[]
   >([]);
   const ignoreNextFetch = useRef(false);
-  const autoConfirmTimer = useRef<number | null>(null);
-  const contentQueue = useRef<string[]>([]);
+  const contentQueue = useRef<{ text: string; title?: string }[]>([]);
   const typeRef = useRef(ctype);
   const timerRef = useRef<number | null>(null);
   const startAtRef = useRef<number | null>(null);
@@ -70,6 +70,18 @@ export default function PracticePage() {
   const wrongRef = useRef<number>(0);
 
   const chars = useMemo(() => Array.from(text), [text]);
+
+  useEffect(() => {
+    // Fetch available volumes
+    fetch("/api/volumes")
+      .then((res) => res.json())
+      .then((data: Volume[]) => {
+        setVolumes(data);
+      })
+      .catch(() => {
+        // Fallback or ignore
+      });
+  }, []);
 
   useEffect(() => {
     let hasUrlText = false;
@@ -82,18 +94,7 @@ export default function PracticePage() {
         setText(t);
         hasUrlText = true;
       }
-      if (
-        typeParam &&
-        [
-          "poem",
-          "tongue",
-          "sentence",
-          "idiom",
-          "mistake",
-          "classical",
-          "random",
-        ].includes(typeParam)
-      ) {
+      if (typeParam) {
         urlType = typeParam as ContentType;
       }
     } catch {}
@@ -103,18 +104,7 @@ export default function PracticePage() {
         setCtype(urlType);
       } else {
         const saved = localStorage.getItem("pinyin_ctype") as ContentType;
-        if (
-          saved &&
-          [
-            "poem",
-            "tongue",
-            "sentence",
-            "idiom",
-            "mistake",
-            "classical",
-            "random",
-          ].includes(saved)
-        ) {
+        if (saved) {
           setCtype(saved);
         }
       }
@@ -126,9 +116,6 @@ export default function PracticePage() {
 
     setIsReady(true);
     return () => {
-      if (autoConfirmTimer.current) {
-        clearTimeout(autoConfirmTimer.current);
-      }
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
@@ -198,64 +185,31 @@ export default function PracticePage() {
 
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (autoConfirmTimer.current) {
-        clearTimeout(autoConfirmTimer.current);
-        autoConfirmTimer.current = null;
-      }
       confirmBuffer();
       return;
     }
     if (e.key === "Backspace") {
       e.preventDefault();
-      if (autoConfirmTimer.current) {
-        clearTimeout(autoConfirmTimer.current);
-        autoConfirmTimer.current = null;
-      }
       setBuffer((prev) => prev.slice(0, -1));
       return;
     }
     if (/^[a-zA-Z1-5]$/.test(e.key)) {
       e.preventDefault();
-      if (autoConfirmTimer.current) {
-        clearTimeout(autoConfirmTimer.current);
-        autoConfirmTimer.current = null;
-      }
       let nextBuffer = (buffer + e.key).toLowerCase();
       if (nextBuffer.length > 6) {
         nextBuffer = "";
       }
       setBuffer(nextBuffer);
-      checkAutoConfirm(nextBuffer);
     }
   };
   const handleKeyWithSession = (
     e: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent
   ) => {
-    if (!sessionActive || remainingSec <= 0) return;
+    if (sessionActive && remainingSec <= 0) return;
     handleKey(e);
   };
 
-  const checkAutoConfirm = (currentBuffer: string) => {
-    if (cursor >= chars.length) return;
-    const c = chars[cursor];
-    if (!isChinese(c)) return;
-
-    const accepted = getAcceptedPinyins(c);
-    const ok = accepted.some((x) => x.norm === normalizeInput(currentBuffer));
-
-    if (ok) {
-      if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current);
-      autoConfirmTimer.current = window.setTimeout(() => {
-        confirmBuffer(currentBuffer);
-      }, 300);
-    }
-  };
-
   const confirmBuffer = (inputBuffer?: string) => {
-    if (autoConfirmTimer.current) {
-      clearTimeout(autoConfirmTimer.current);
-      autoConfirmTimer.current = null;
-    }
     if (cursor >= chars.length) return;
 
     const buf = inputBuffer !== undefined ? inputBuffer : buffer;
@@ -300,7 +254,9 @@ export default function PracticePage() {
     }
   };
 
-  const fetchContent = async (targetType: ContentType): Promise<string> => {
+  const fetchContent = async (
+    targetType: ContentType
+  ): Promise<{ text: string; title?: string }[]> => {
     let mistakes: string[] = [];
     if (targetType === "mistake") {
       const list = loadMistakes();
@@ -319,16 +275,22 @@ export default function PracticePage() {
       throw new Error("Fetch failed");
     }
     const data = await response.json();
-    return data.content;
+    if (data.article) {
+      return data.article.content.map((c: string) => ({
+        text: c,
+        title: data.article.title,
+      }));
+    }
+    return [{ text: data.content }];
   };
 
   const preloadContent = async () => {
     if (contentQueue.current.length < 3) {
       try {
         const typeToFetch = typeRef.current;
-        const nextText = await fetchContent(typeToFetch);
+        const nextTexts = await fetchContent(typeToFetch);
         if (typeRef.current !== typeToFetch) return;
-        if (nextText) contentQueue.current.push(nextText);
+        contentQueue.current.push(...nextTexts);
       } catch (e) {
         console.error(e);
       }
@@ -339,11 +301,12 @@ export default function PracticePage() {
     const targetType = typeOverride || ctype;
 
     if (contentQueue.current.length > 0) {
-      const nextText = contentQueue.current.shift();
-      if (nextText) {
-        setText(nextText);
-        if (nextText === text) {
-          resetGame(nextText);
+      const nextItem = contentQueue.current.shift();
+      if (nextItem) {
+        setText(nextItem.text);
+        setLessonTitle(nextItem.title || "");
+        if (nextItem.text === text) {
+          resetGame(nextItem.text);
         }
         if (
           typeof window !== "undefined" &&
@@ -363,12 +326,18 @@ export default function PracticePage() {
 
     setLoadingGen(true);
     try {
-      const content = await fetchContent(targetType);
-      setText(content);
+      const contents = await fetchContent(targetType);
+      const first = contents[0];
+      if (contents.length > 1) {
+        contentQueue.current.push(...contents.slice(1));
+      }
+
+      setText(first.text);
+      setLessonTitle(first.title || "");
 
       // Force reset if text is same, otherwise useEffect[text] will handle it
-      if (content === text) {
-        resetGame(content);
+      if (first.text === text) {
+        resetGame(first.text);
       }
 
       if (
@@ -537,7 +506,14 @@ export default function PracticePage() {
     <div className="min-h-screen bg-gray-50 py-6 px-4">
       <div className="max-w-4xl mx-auto space-y-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-3">
-          <h1 className="text-xl font-bold shrink-0">练习</h1>
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 shrink-0">
+            <h1 className="text-xl font-bold">练习</h1>
+            {lessonTitle && (
+              <div className="text-base text-blue-600 font-medium px-2 py-0.5 bg-blue-50 rounded">
+                {lessonTitle}
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-3 flex-1 justify-end w-full sm:w-auto">
             <select
@@ -561,13 +537,22 @@ export default function PracticePage() {
               }}
               disabled={sessionActive}
             >
-              <option value="random">随机推荐</option>
-              <option value="poem">唐诗宋词</option>
-              <option value="tongue">绕口令</option>
-              <option value="sentence">课文短句</option>
-              <option value="idiom">常用成语</option>
-              <option value="classical">古文(小学)</option>
-              <option value="mistake">错题练习</option>
+              <optgroup label="教材">
+                {volumes.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="其他">
+                <option value="random">随机推荐</option>
+                <option value="poem">唐诗宋词</option>
+                <option value="tongue">绕口令</option>
+                <option value="sentence">课文短句</option>
+                <option value="idiom">常用成语</option>
+                <option value="classical">古文(小学)</option>
+                <option value="mistake">错题练习</option>
+              </optgroup>
             </select>
 
             <Button

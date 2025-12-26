@@ -1,4 +1,5 @@
 import { pinyin } from "pinyin-pro";
+import { getVolumeData, getAvailableVolumes } from "./data";
 
 interface Env {
   GOOGLE_AI_STUDIO_TOKEN: string;
@@ -22,6 +23,10 @@ export default {
         return new Response("Method Not Allowed", { status: 405 });
       }
       return handleGenerate(request, env);
+    }
+
+    if (url.pathname === "/api/volumes") {
+      return Response.json(getAvailableVolumes());
     }
 
     return new Response("Not Found", { status: 404 });
@@ -69,6 +74,20 @@ async function handleGenerate(request: Request, env: Env) {
     const body: any = await request.json();
     let { type, mistakes } = body;
 
+    // Check if type is a volume ID
+    const volumeData = getVolumeData(type);
+    if (volumeData && volumeData.length > 0) {
+      // Pick random article
+      const randomArticle =
+        volumeData[Math.floor(Math.random() * volumeData.length)];
+      return Response.json({
+        article: {
+          title: randomArticle.lesson,
+          content: randomArticle.content,
+        },
+      });
+    }
+
     if (type === "random") {
       const options = ["poem", "tongue", "sentence", "idiom", "classical"];
       type = options[Math.floor(Math.random() * options.length)];
@@ -78,7 +97,7 @@ async function handleGenerate(request: Request, env: Env) {
       poem: ["床前明月光，疑是地上霜"],
       tongue: ["吃葡萄不吐葡萄皮，不吃葡萄倒吐葡萄皮"],
       sentence: ["小朋友喜欢读书，书中自有黄金屋"],
-      idiom: ["亡羊补牢，为时未晚"],
+      idiom: ["有朋自远方来，不亦乐乎"],
       mistake: ["干燥的沙漠少雨，急躁的脾气不好"],
       classical: ["学而时习之，不亦说乎"],
     };
