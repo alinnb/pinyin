@@ -249,7 +249,23 @@ export default function PracticePage() {
     if (next <= chars.length) {
       setCursor(next);
       if (next === chars.length) {
-        toast.success("练习完成，按空格刷新");
+        const isTextbook = ![
+          "random",
+          "poem",
+          "tongue",
+          "sentence",
+          "idiom",
+          "classical",
+          "mistake",
+        ].includes(ctype);
+
+        if (isTextbook) {
+          setTimeout(() => {
+            refreshContent();
+          }, 500);
+        } else {
+          toast.success("练习完成，按空格刷新");
+        }
       }
     }
   };
@@ -297,10 +313,13 @@ export default function PracticePage() {
     }
   };
 
-  const refreshContent = async (typeOverride?: ContentType) => {
+  const refreshContent = async (
+    typeOverride?: ContentType,
+    skipQueue: boolean = false
+  ) => {
     const targetType = typeOverride || ctype;
 
-    if (contentQueue.current.length > 0) {
+    if (!skipQueue && contentQueue.current.length > 0) {
       const nextItem = contentQueue.current.shift();
       if (nextItem) {
         setText(nextItem.text);
@@ -322,6 +341,10 @@ export default function PracticePage() {
         preloadContent();
         return;
       }
+    }
+
+    if (skipQueue) {
+      contentQueue.current = [];
     }
 
     setLoadingGen(true);
@@ -558,7 +581,7 @@ export default function PracticePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => refreshContent()}
+              onClick={() => refreshContent(undefined, true)}
               disabled={loadingGen || sessionActive}
               className="h-8"
             >
