@@ -43,6 +43,12 @@ export function clearMistakes() {
   saveMistakes([]);
 }
 
+export function removeMistake(char: string, correct: string) {
+  const list = loadMistakes();
+  const newList = list.filter((m) => !(m.char === char && m.correct === correct));
+  saveMistakes(newList);
+}
+
 export type SessionStat = {
   id: string;
   startAt: number;

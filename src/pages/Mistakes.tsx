@@ -1,3 +1,4 @@
+import { Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Card,
@@ -7,7 +8,7 @@ import {
   CardFooter,
 } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { clearMistakes, loadMistakes } from "../lib/storage";
+import { clearMistakes, loadMistakes, removeMistake } from "../lib/storage";
 import type { MistakeEntry } from "../lib/storage";
 
 export default function MistakesPage() {
@@ -20,6 +21,11 @@ export default function MistakesPage() {
   const handleClear = () => {
     clearMistakes();
     setList([]);
+  };
+
+  const handleDelete = (char: string, correct: string) => {
+    removeMistake(char, correct);
+    setList(loadMistakes());
   };
 
   const practiceFromMistakes = () => {
@@ -61,7 +67,10 @@ export default function MistakesPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {list.map((m, i) => (
-                  <div key={i} className="rounded-md border p-4 bg-white">
+                  <div
+                    key={i}
+                    className="rounded-md border p-4 bg-white relative group"
+                  >
                     <div className="text-2xl">{m.char}</div>
                     <div className="mt-2 text-sm">
                       <span className="text-red-600 mr-4">错误：{m.wrong}</span>
@@ -70,6 +79,15 @@ export default function MistakesPage() {
                     <div className="mt-2 text-xs text-gray-500">
                       错误次数：{m.count}
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => handleDelete(m.char, m.correct)}
+                      title="删除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </div>
