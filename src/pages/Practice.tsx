@@ -185,6 +185,10 @@ export default function PracticePage() {
 
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
+      // Require at least 1 char for Space to prevent accidental skips
+      if (e.key === " " && buffer.length === 0) {
+        return;
+      }
       confirmBuffer();
       return;
     }
