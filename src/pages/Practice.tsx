@@ -176,17 +176,17 @@ export default function PracticePage() {
     e: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent
   ) => {
     if (cursor >= chars.length) {
-      if (e.key === " " || e.key === "Enter") {
+      if (e.key === " ") {
         e.preventDefault();
         refreshContent();
       }
       return;
     }
 
-    if (e.key === "Enter" || e.key === " ") {
+    if (e.key === " ") {
       e.preventDefault();
       // Require at least 1 char for Space to prevent accidental skips
-      if (e.key === " " && buffer.length === 0) {
+      if (buffer.length === 0) {
         return;
       }
       confirmBuffer();
@@ -277,19 +277,40 @@ export default function PracticePage() {
   const fetchContent = async (
     targetType: ContentType
   ): Promise<{ text: string; title?: string }[]> => {
-    let mistakes: string[] = [];
     if (targetType === "mistake") {
       const list = loadMistakes();
-      mistakes = list
+      if (list.length === 0) {
+        return [{ text: "恭喜你没有错题继续加油", title: "错题练习" }];
+      }
+      
+      // Take top 30 mistakes
+      const topMistakes = list
         .sort((a, b) => b.count - a.count)
-        .map((m) => m.char)
-        .slice(0, 10);
+        .slice(0, 30)
+        .map((m) => m.char);
+
+      // Fill pool
+      let pool = [...topMistakes];
+      // Ensure reasonable length
+      while (pool.length < 20) {
+        pool = pool.concat(topMistakes);
+      }
+      
+      // Shuffle
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      
+      // Limit length
+      const resultText = pool.slice(0, 50).join("");
+      return [{ text: resultText, title: "错题强化" }];
     }
 
     const response = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: targetType, mistakes }),
+      body: JSON.stringify({ type: targetType }),
     });
     if (!response.ok) {
       throw new Error("Fetch failed");
@@ -664,6 +685,22 @@ export default function PracticePage() {
           onKeyDown={handleKeyWithSession}
           onConfirm={confirmBuffer}
         />
+
+        <div className="flex justify-center gap-8 text-sm text-gray-500">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs shadow-sm font-mono">
+              Space
+            </span>
+            <span>确认/下一个</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs shadow-sm font-mono">
+              Backspace
+            </span>
+            <span>删除</span>
+          </div>
+        </div>
+
         <QwertyKeyboard />
 
         {!sessionActive && lastSummary && (
