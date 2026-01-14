@@ -1,14 +1,27 @@
 import { pinyin } from "pinyin-pro";
-import { getVolumeData, getAvailableVolumes } from "./data";
+import {
+  initDB,
+  getAvailableVolumes,
+  getVolumeData,
+  getRandomArticle,
+  getArticleById,
+} from "./lib/db";
 
 interface Env {
   GOOGLE_AI_STUDIO_TOKEN: string;
   GEMINI_MODEL_CHAT: string;
   NODE_ENV?: string;
+  DB: D1Database;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    try {
+      await initDB(env.DB);
+    } catch (error) {
+      console.error("Failed to initialize database:", error);
+    }
+
     const url = new URL(request.url);
 
     if (url.pathname === "/api/pinyin") {
@@ -26,24 +39,71 @@ export default {
     }
 
     if (url.pathname === "/api/volumes") {
-      return Response.json(getAvailableVolumes());
+      const volumes = await getAvailableVolumes(env.DB);
+      return Response.json(volumes);
+    }
+
+    if (url.pathname === "/api/articles") {
+      const volumeId = url.searchParams.get("volume");
+      if (!volumeId) {
+        return Response.json(
+          { error: "volume parameter required" },
+          { status: 400 }
+        );
+      }
+      const articles = await getVolumeData(env.DB, volumeId);
+      return Response.json(articles);
+    }
+
+    if (url.pathname === "/api/random") {
+      const volumeId = url.searchParams.get("volume") || undefined;
+      const article = await getRandomArticle(env.DB, volumeId);
+      if (!article) {
+        return Response.json({ error: "No article found" }, { status: 404 });
+      }
+      const sentence = pickRandomSentence(article.content);
+      return Response.json({
+        article: {
+          title: article.lesson,
+          content: [sentence],
+        },
+      });
     }
 
     return new Response("Not Found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
 
+function splitContentLines(content: string): string[] {
+  const normalized = content
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+  return normalized
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function pickRandomSentence(content: string): string {
+  const lines = splitContentLines(content);
+  if (lines.length === 0) return content.trim();
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
 async function handlePinyin(request: Request) {
   try {
-    const body: any = await request.json();
+    const body: Record<string, unknown> = await request.json();
     const { text, options } = body;
 
     if (!text || typeof text !== "string" || text.trim() === "") {
       return Response.json({ error: "请输入有效的中文文本" }, { status: 400 });
     }
 
-    const userOptions = options || {};
-    const pinyinOptions: any = {
+    const userOptions = (options as Record<string, unknown>) || {};
+    const pinyinOptions: Record<string, unknown> = {
       toneType: userOptions.toneType || "none",
       type: userOptions.type || "string",
       multiple: userOptions.multiple || false,
@@ -61,9 +121,11 @@ async function handlePinyin(request: Request) {
         options: pinyinOptions,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     return Response.json(
-      { code: -1, error: "服务器内部错误", message: error.message },
+      { code: -1, error: "服务器内部错误", message: errorMessage },
       { status: 500 }
     );
   }
@@ -71,23 +133,85 @@ async function handlePinyin(request: Request) {
 
 async function handleGenerate(request: Request, env: Env) {
   try {
-    const body: any = await request.json();
-    let { type, mistakes } = body;
+    const body: Record<string, unknown> = await request.json();
+    const {
+      type: initialType,
+      mistakes,
+      articleId,
+      lineIndex,
+    } = body as {
+      type: string;
+      mistakes?: string[];
+      articleId?: number;
+      lineIndex?: number;
+    };
 
-    // Check if type is a volume ID
-    const volumeData = getVolumeData(type);
-    if (volumeData && volumeData.length > 0) {
-      // Pick random article
-      const randomArticle =
-        volumeData[Math.floor(Math.random() * volumeData.length)];
-      return Response.json({
-        article: {
-          title: randomArticle.lesson,
-          content: randomArticle.content,
-        },
-      });
+    // 如果指定了 articleId 和 lineIndex，尝试获取下一句
+    if (typeof articleId === "number" && typeof lineIndex === "number") {
+      const dbArticle = await getArticleById(env.DB, articleId);
+      if (dbArticle) {
+        const lines = dbArticle.content
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+        const nextIndex = lineIndex + 1;
+
+        if (nextIndex < lines.length) {
+          return Response.json({
+            article: {
+              id: dbArticle.id,
+              title: dbArticle.lesson,
+              content: [lines[nextIndex]],
+              lineIndex: nextIndex,
+              totalLines: lines.length,
+            },
+          });
+        }
+        // 如果已经到末尾，继续下面的逻辑（随机取新的）
+      }
     }
 
+    // 尝试从 DB 获取（如果 initialType 是 volumeId）
+    // 注意：getRandomArticle 内部会判断是否是 volumeId，如果不是（比如是 random/poem 等），可能也会返回 null 或者抛错？
+    // 这里我们先判断 initialType 是否看起来像 volumeId（或者我们信任 getVolumeData 能处理）
+    // 之前逻辑是直接调用 getVolumeData 来检查是否有数据，现在可以用 getRandomArticle
+
+    // 简单判断：如果不是预定义的类型，假设它是 volumeId
+    const isPredefined = [
+      "random",
+      "poem",
+      "tongue",
+      "sentence",
+      "idiom",
+      "classical",
+      "mistake",
+    ].includes(initialType);
+
+    if (!isPredefined) {
+      const dbArticle = await getRandomArticle(env.DB, initialType);
+      if (dbArticle) {
+        const lines = dbArticle.content
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+
+        // 随机取一行
+        const idx = Math.floor(Math.random() * lines.length);
+        const sentence = lines[idx];
+
+        return Response.json({
+          article: {
+            id: dbArticle.id,
+            title: dbArticle.lesson,
+            content: [sentence],
+            lineIndex: idx,
+            totalLines: lines.length,
+          },
+        });
+      }
+    }
+
+    let type = initialType;
     if (type === "random") {
       const options = ["poem", "tongue", "sentence", "idiom", "classical"];
       type = options[Math.floor(Math.random() * options.length)];
@@ -110,21 +234,10 @@ async function handleGenerate(request: Request, env: Env) {
 
     let prompt = "";
     if (type === "mistake") {
-      let mistakesToUse = mistakes;
-      if (!mistakes || mistakes.length === 0) {
-        mistakesToUse = [
-          "那",
-          "哪",
-          "拔",
-          "拨",
-          "拆",
-          "折",
-          "即",
-          "既",
-          "染",
-          "梁",
-        ];
-      }
+      const mistakesToUse =
+        mistakes && mistakes.length > 0
+          ? mistakes
+          : ["那", "哪", "拔", "拨", "拆", "折", "即", "既", "染", "梁"];
       const mistakesStr = mistakesToUse.slice(0, 20).join("，");
       prompt = `我的易错字是：${mistakesStr}。请根据这些易错字，生成一个包含这些字或类似易错字的短句，用于练习拼音。长度10-20字。只输出文本，保留标点符号，不要包含其他解释。`;
     } else {

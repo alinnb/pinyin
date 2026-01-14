@@ -59,8 +59,31 @@ export default function PracticePage() {
       accuracy: number;
     }[]
   >([]);
+  const [currentArticleInfo, setCurrentArticleInfo] = useState<{
+    articleId: number;
+    lineIndex: number;
+    totalLines: number;
+  } | null>(null);
+  const currentArticleInfoRef = useRef<{
+    articleId: number;
+    lineIndex: number;
+    totalLines: number;
+  } | null>(null);
+
+  useEffect(() => {
+    currentArticleInfoRef.current = currentArticleInfo;
+  }, [currentArticleInfo]);
+
   const ignoreNextFetch = useRef(false);
-  const contentQueue = useRef<{ text: string; title?: string }[]>([]);
+  const contentQueue = useRef<
+    {
+      text: string;
+      title?: string;
+      articleId?: number;
+      lineIndex?: number;
+      totalLines?: number;
+    }[]
+  >([]);
   const typeRef = useRef(ctype);
   const timerRef = useRef<number | null>(null);
   const startAtRef = useRef<number | null>(null);
@@ -265,7 +288,15 @@ export default function PracticePage() {
 
         if (isTextbook) {
           setTimeout(() => {
-            refreshContent();
+            const info = currentArticleInfoRef.current;
+            if (info) {
+              refreshContent(undefined, true, {
+                articleId: info.articleId,
+                lineIndex: info.lineIndex,
+              });
+            } else {
+              refreshContent();
+            }
           }, 500);
         } else {
           toast.success("练习完成，按空格刷新");
@@ -275,42 +306,36 @@ export default function PracticePage() {
   };
 
   const fetchContent = async (
-    targetType: ContentType
-  ): Promise<{ text: string; title?: string }[]> => {
+    targetType: ContentType,
+    nextFrom?: { articleId: number; lineIndex: number }
+  ): Promise<
+    {
+      text: string;
+      title?: string;
+      articleId?: number;
+      lineIndex?: number;
+      totalLines?: number;
+    }[]
+  > => {
+    let mistakes: string[] = [];
     if (targetType === "mistake") {
       const list = loadMistakes();
-      if (list.length === 0) {
-        return [{ text: "恭喜你没有错题继续加油", title: "错题练习" }];
-      }
-      
-      // Take top 30 mistakes
-      const topMistakes = list
+      mistakes = list
         .sort((a, b) => b.count - a.count)
-        .slice(0, 30)
-        .map((m) => m.char);
+        .map((m) => m.char)
+        .slice(0, 10);
+    }
 
-      // Fill pool
-      let pool = [...topMistakes];
-      // Ensure reasonable length
-      while (pool.length < 20) {
-        pool = pool.concat(topMistakes);
-      }
-      
-      // Shuffle
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
-      
-      // Limit length
-      const resultText = pool.slice(0, 50).join("");
-      return [{ text: resultText, title: "错题强化" }];
+    const body: any = { type: targetType, mistakes };
+    if (nextFrom) {
+      body.articleId = nextFrom.articleId;
+      body.lineIndex = nextFrom.lineIndex;
     }
 
     const response = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: targetType }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       throw new Error("Fetch failed");
@@ -320,12 +345,28 @@ export default function PracticePage() {
       return data.article.content.map((c: string) => ({
         text: c,
         title: data.article.title,
+        articleId: data.article.id,
+        lineIndex: data.article.lineIndex,
+        totalLines: data.article.totalLines,
       }));
     }
     return [{ text: data.content }];
   };
 
   const preloadContent = async () => {
+    // Disable preload for textbook mode to ensure correct sequencing
+    const isTextbook = ![
+      "random",
+      "poem",
+      "tongue",
+      "sentence",
+      "idiom",
+      "classical",
+      "mistake",
+    ].includes(typeRef.current);
+
+    if (isTextbook) return;
+
     if (contentQueue.current.length < 3) {
       try {
         const typeToFetch = typeRef.current;
@@ -340,15 +381,34 @@ export default function PracticePage() {
 
   const refreshContent = async (
     typeOverride?: ContentType,
-    skipQueue: boolean = false
+    skipQueue: boolean = false,
+    nextFrom?: { articleId: number; lineIndex: number }
   ) => {
     const targetType = typeOverride || ctype;
+
+    if (nextFrom) {
+      skipQueue = true;
+    }
 
     if (!skipQueue && contentQueue.current.length > 0) {
       const nextItem = contentQueue.current.shift();
       if (nextItem) {
         setText(nextItem.text);
         setLessonTitle(nextItem.title || "");
+        if (
+          nextItem.articleId !== undefined &&
+          nextItem.lineIndex !== undefined &&
+          nextItem.totalLines !== undefined
+        ) {
+          setCurrentArticleInfo({
+            articleId: nextItem.articleId,
+            lineIndex: nextItem.lineIndex,
+            totalLines: nextItem.totalLines,
+          });
+        } else {
+          setCurrentArticleInfo(null);
+        }
+
         if (nextItem.text === text) {
           resetGame(nextItem.text);
         }
@@ -374,7 +434,7 @@ export default function PracticePage() {
 
     setLoadingGen(true);
     try {
-      const contents = await fetchContent(targetType);
+      const contents = await fetchContent(targetType, nextFrom);
       const first = contents[0];
       if (contents.length > 1) {
         contentQueue.current.push(...contents.slice(1));
@@ -382,6 +442,19 @@ export default function PracticePage() {
 
       setText(first.text);
       setLessonTitle(first.title || "");
+      if (
+        first.articleId !== undefined &&
+        first.lineIndex !== undefined &&
+        first.totalLines !== undefined
+      ) {
+        setCurrentArticleInfo({
+          articleId: first.articleId,
+          lineIndex: first.lineIndex,
+          totalLines: first.totalLines,
+        });
+      } else {
+        setCurrentArticleInfo(null);
+      }
 
       // Force reset if text is same, otherwise useEffect[text] will handle it
       if (first.text === text) {
