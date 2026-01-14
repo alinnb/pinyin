@@ -76,9 +76,11 @@ export default {
 
 function splitContentLines(content: string): string[] {
   const normalized = content
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\n")
+    // Handle literal \r\n, \n, \r with optional spaces
+    .replace(/\\\s*r\s*\\?\s*n/g, "\n")
+    .replace(/\\\s*n/g, "\n")
+    .replace(/\\\s*r/g, "\n")
+    // Handle actual control characters
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
   return normalized
@@ -150,10 +152,7 @@ async function handleGenerate(request: Request, env: Env) {
     if (typeof articleId === "number" && typeof lineIndex === "number") {
       const dbArticle = await getArticleById(env.DB, articleId);
       if (dbArticle) {
-        const lines = dbArticle.content
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0);
+        const lines = splitContentLines(dbArticle.content);
         const nextIndex = lineIndex + 1;
 
         if (nextIndex < lines.length) {
@@ -190,21 +189,18 @@ async function handleGenerate(request: Request, env: Env) {
     if (!isPredefined) {
       const dbArticle = await getRandomArticle(env.DB, initialType);
       if (dbArticle) {
-        const lines = dbArticle.content
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0);
+        const lines = splitContentLines(dbArticle.content);
 
         // 随机取一行
-        const idx = Math.floor(Math.random() * lines.length);
-        const sentence = lines[idx];
+        // const idx = Math.floor(Math.random() * lines.length);
+        // const sentence = lines[idx];
 
         return Response.json({
           article: {
             id: dbArticle.id,
             title: dbArticle.lesson,
-            content: [sentence],
-            lineIndex: idx,
+            content: lines,
+            lineIndex: 0,
             totalLines: lines.length,
           },
         });

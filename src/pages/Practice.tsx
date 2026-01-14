@@ -288,15 +288,7 @@ export default function PracticePage() {
 
         if (isTextbook) {
           setTimeout(() => {
-            const info = currentArticleInfoRef.current;
-            if (info) {
-              refreshContent(undefined, true, {
-                articleId: info.articleId,
-                lineIndex: info.lineIndex,
-              });
-            } else {
-              refreshContent();
-            }
+            refreshContent();
           }, 500);
         } else {
           toast.success("练习完成，按空格刷新");
@@ -354,25 +346,19 @@ export default function PracticePage() {
   };
 
   const preloadContent = async () => {
-    // Disable preload for textbook mode to ensure correct sequencing
-    const isTextbook = ![
-      "random",
-      "poem",
-      "tongue",
-      "sentence",
-      "idiom",
-      "classical",
-      "mistake",
-    ].includes(typeRef.current);
-
-    if (isTextbook) return;
-
     if (contentQueue.current.length < 3) {
       try {
         const typeToFetch = typeRef.current;
         const nextTexts = await fetchContent(typeToFetch);
         if (typeRef.current !== typeToFetch) return;
-        contentQueue.current.push(...nextTexts);
+
+        // If multiple lines (Textbook), pick a random start
+        if (nextTexts.length > 1) {
+          const startIndex = Math.floor(Math.random() * nextTexts.length);
+          contentQueue.current.push(...nextTexts.slice(startIndex));
+        } else {
+          contentQueue.current.push(...nextTexts);
+        }
       } catch (e) {
         console.error(e);
       }
@@ -435,9 +421,16 @@ export default function PracticePage() {
     setLoadingGen(true);
     try {
       const contents = await fetchContent(targetType, nextFrom);
-      const first = contents[0];
-      if (contents.length > 1) {
-        contentQueue.current.push(...contents.slice(1));
+
+      let startIndex = 0;
+      // If we got a full article (not just one line) and we are not continuing (no nextFrom), pick random start
+      if (contents.length > 1 && !nextFrom) {
+        startIndex = Math.floor(Math.random() * contents.length);
+      }
+
+      const first = contents[startIndex];
+      if (contents.length > startIndex + 1) {
+        contentQueue.current.push(...contents.slice(startIndex + 1));
       }
 
       setText(first.text);
