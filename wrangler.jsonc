@@ -29,6 +29,13 @@
       "migrations_dir": "worker/migrations"
     }
   ],
+  "vars": {
+    "LLM_PROVIDER": "gemini",
+    "GEMINI_MODEL_NAME": "gemini-2.5-flash",
+    "ARK_MODEL_NAME": "ep-20251202105729-qvgkw",
+    "LLM_MAX_WORKERS": "10",
+    "LOG_LLM_CONTENT": "true"
+  },
   "workers_dev": true,
   "preview_urls": true
   /**
