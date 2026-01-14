@@ -29,9 +29,6 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  "vars": {
-    "GEMINI_MODEL_CHAT": "gemini-2.5-flash"
-  },
   "workers_dev": true,
   "preview_urls": true
   /**

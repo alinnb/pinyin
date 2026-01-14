@@ -1,4 +1,6 @@
 import { pinyin } from "pinyin-pro";
+import { createLLM } from "./llm/index";
+import type { Env as LLMEnv } from "./llm/index";
 import {
   initDB,
   getAvailableVolumes,
@@ -7,9 +9,7 @@ import {
   getArticleById,
 } from "./lib/db";
 
-interface Env {
-  GOOGLE_AI_STUDIO_TOKEN: string;
-  GEMINI_MODEL_CHAT: string;
+interface Env extends LLMEnv {
   NODE_ENV?: string;
   DB: D1Database;
 }
@@ -253,54 +253,29 @@ async function handleGenerate(request: Request, env: Env) {
           : "随机生成一句小学阶段语文课文短句，长度10-20中文字。只输出文本，保留标点符号，不要包含其他解释。";
     }
 
-    if (!env.GOOGLE_AI_STUDIO_TOKEN) {
-      return Response.json({ content: pickLocal() });
-    }
+    // 适配 LLM 库需要的环境变量
+    // 优先使用标准变量，如果没有，则尝试从旧变量迁移
+    const llmEnv: LLMEnv = {
+      ...env,
+      // 默认使用 gemini，除非环境变量指定了其他
+      LLM_PROVIDER: env.LLM_PROVIDER || "gemini",
+      // 如果没有配置 GEMINI_MODEL_NAME，给一个默认值
+      GEMINI_MODEL_NAME: env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+    };
 
-    console.log("[Worker] GOOGLE_AI_STUDIO_TOKEN is present");
-
-    const ACCOUNT_ID = "6557015f49716345b2e62bcd3c3a9cd3";
-    const GATEWAY_NAME = "pinyin-app";
-    const MODEL = env.GEMINI_MODEL_CHAT || "gemini-2.5-flash";
-    const url = `https://gateway.ai.cloudflare.com/v1/${ACCOUNT_ID}/${GATEWAY_NAME}/google-ai-studio/v1/models/${MODEL}:generateContent`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "cf-aig-authorization": `Bearer ${env.GOOGLE_AI_STUDIO_TOKEN}`,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 1.0,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        `[Worker] Gemini API error! status: ${response.status}, body: ${errorText}`
+    if (!llmEnv.GEMINI_API_KEY && llmEnv.LLM_PROVIDER === "gemini") {
+      console.warn(
+        "[Worker] No GEMINI_API_KEY or GOOGLE_AI_STUDIO_TOKEN found."
       );
       return Response.json({ content: pickLocal() });
     }
 
-    const data: any = await response.json();
-    let text = "";
-    if (
-      data.candidates &&
-      data.candidates[0] &&
-      data.candidates[0].content &&
-      data.candidates[0].content.parts
-    ) {
-      text = data.candidates[0].content.parts.map((p: any) => p.text).join("");
-    }
+    const llm = createLLM(llmEnv);
+    const textStr = await llm.generateSimple(
+      "你是一个中文教育专家，负责生成适合小学生的拼音练习内容。",
+      prompt
+    );
+    let text = textStr || "";
 
     if (text) {
       const out = text.trim().replace(/\s+/g, "");

@@ -43,14 +43,15 @@ let isInitialized = false;
 export async function initDB(db: D1Database): Promise<void> {
   if (isInitialized) return;
 
-  await db.exec(`
+  try {
+    await db.exec(`
     CREATE TABLE IF NOT EXISTS volumes (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL
     );
   `);
 
-  await db.exec(`
+    await db.exec(`
     CREATE TABLE IF NOT EXISTS articles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       volume_id TEXT NOT NULL,
@@ -59,6 +60,24 @@ export async function initDB(db: D1Database): Promise<void> {
       FOREIGN KEY (volume_id) REFERENCES volumes(id)
     );
   `);
+  } catch (error: any) {
+    // 忽略 Cloudflare 本地开发环境的特定错误
+    // TypeError: Cannot read properties of undefined (reading 'duration')
+    const isKnownError =
+      error instanceof TypeError &&
+      error.message &&
+      error.message.includes("duration");
+
+    if (!isKnownError) {
+      console.error("DB Init Error:", error);
+      // 如果是其他错误，我们可能不想标记为已初始化，以便重试？
+      // 或者为了避免无限报错，还是标记为 true？
+      // 这里选择抛出，让外层决定，但外层目前只是 log。
+      throw error;
+    } else {
+      // console.warn("Ignored known D1 local dev error");
+    }
+  }
 
   isInitialized = true;
 }
