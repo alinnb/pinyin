@@ -1,6 +1,4 @@
 import { pinyin } from "pinyin-pro";
-import { createLLM } from "./llm/index";
-import type { Env as LLMEnv } from "./llm/index";
 import {
   initDB,
   getAvailableVolumes,
@@ -9,7 +7,7 @@ import {
   getArticleById,
 } from "./lib/db";
 
-interface Env extends LLMEnv {
+interface Env {
   NODE_ENV?: string;
   DB: D1Database;
 }
@@ -148,6 +146,34 @@ async function handleGenerate(request: Request, env: Env) {
       lineIndex?: number;
     };
 
+    // 错题练习：直接返回包含错题字符的练习内容
+    if (initialType === "mistake") {
+      const charsToUse = mistakes && mistakes.length > 0
+        ? mistakes.slice(0, 10)
+        : ["那", "哪", "拔", "拨", "拆", "折", "即", "既", "染", "梁"];
+
+      // 将错题字符组成简单的练习句
+      const practiceWordList = [
+        "天空大地花草树木江河湖海山川",
+        "日月星辰风雨雷电云雾雪霜",
+        "春夏秋冬春夏秋冬春秋冬夏",
+        "爸爸妈妈哥哥姐姐弟弟妹妹",
+        "老师同学朋友邻居客人",
+      ];
+      const baseText = practiceWordList[Math.floor(Math.random() * practiceWordList.length)];
+
+      // 随机替换一些字符为错题字符
+      const chars = Array.from(baseText);
+      for (let i = 0; i < Math.min(charsToUse.length, 4); i++) {
+        const randomIndex = Math.floor(Math.random() * chars.length);
+        chars[randomIndex] = charsToUse[i];
+      }
+
+      return Response.json({
+        content: chars.join(""),
+      });
+    }
+
     // 如果指定了 articleId 和 lineIndex，尝试获取下一句
     if (typeof articleId === "number" && typeof lineIndex === "number") {
       const dbArticle = await getArticleById(env.DB, articleId);
@@ -166,127 +192,29 @@ async function handleGenerate(request: Request, env: Env) {
             },
           });
         }
-        // 如果已经到末尾，继续下面的逻辑（随机取新的）
       }
     }
 
     // 尝试从 DB 获取（如果 initialType 是 volumeId）
-    // 注意：getRandomArticle 内部会判断是否是 volumeId，如果不是（比如是 random/poem 等），可能也会返回 null 或者抛错？
-    // 这里我们先判断 initialType 是否看起来像 volumeId（或者我们信任 getVolumeData 能处理）
-    // 之前逻辑是直接调用 getVolumeData 来检查是否有数据，现在可以用 getRandomArticle
+    const dbArticle = await getRandomArticle(env.DB, initialType);
+    if (dbArticle) {
+      const lines = splitContentLines(dbArticle.content);
 
-    // 简单判断：如果不是预定义的类型，假设它是 volumeId
-    const isPredefined = [
-      "random",
-      "poem",
-      "tongue",
-      "sentence",
-      "idiom",
-      "classical",
-      "mistake",
-    ].includes(initialType);
-
-    if (!isPredefined) {
-      const dbArticle = await getRandomArticle(env.DB, initialType);
-      if (dbArticle) {
-        const lines = splitContentLines(dbArticle.content);
-
-        // 随机取一行
-        // const idx = Math.floor(Math.random() * lines.length);
-        // const sentence = lines[idx];
-
-        return Response.json({
-          article: {
-            id: dbArticle.id,
-            title: dbArticle.lesson,
-            content: lines,
-            lineIndex: 0,
-            totalLines: lines.length,
-          },
-        });
-      }
+      return Response.json({
+        article: {
+          id: dbArticle.id,
+          title: dbArticle.lesson,
+          content: lines,
+          lineIndex: 0,
+          totalLines: lines.length,
+        },
+      });
     }
 
-    let type = initialType;
-    if (type === "random") {
-      const options = ["poem", "tongue", "sentence", "idiom", "classical"];
-      type = options[Math.floor(Math.random() * options.length)];
-    }
-
-    const samples: Record<string, string[]> = {
-      poem: ["床前明月光，疑是地上霜"],
-      tongue: ["吃葡萄不吐葡萄皮，不吃葡萄倒吐葡萄皮"],
-      sentence: ["小朋友喜欢读书，书中自有黄金屋"],
-      idiom: ["有朋自远方来，不亦乐乎"],
-      mistake: ["干燥的沙漠少雨，急躁的脾气不好"],
-      classical: ["学而时习之，不亦说乎"],
-    };
-
-    const pickLocal = () => {
-      const arr = samples[type] || samples["sentence"];
-      const s = arr[Math.floor(Math.random() * arr.length)];
-      return s.slice(0, 20);
-    };
-
-    let prompt = "";
-    if (type === "mistake") {
-      const mistakesToUse =
-        mistakes && mistakes.length > 0
-          ? mistakes
-          : ["那", "哪", "拔", "拨", "拆", "折", "即", "既", "染", "梁"];
-      const mistakesStr = mistakesToUse.slice(0, 20).join("，");
-      prompt = `我的易错字是：${mistakesStr}。请根据这些易错字，生成一个包含这些字或类似易错字的短句，用于练习拼音。长度10-20字。只输出文本，保留标点符号，不要包含其他解释。`;
-    } else {
-      prompt =
-        type === "poem"
-          ? "随机生成一行小学阶段唐诗或宋词，需要真实存在而不是AI生成，长度10-20中文字。只输出文本，保留标点符号，不要包含其他解释。"
-          : type === "tongue"
-          ? "随机生成一条小学阶段绕口令，去除生僻字，长度10-20中文字。只输出文本，保留标点符号，不要包含其他解释。"
-          : type === "idiom"
-          ? "随机生成小学阶段的【2个常用短语/谚语】或【3个四字成语】，长度10-25中文字，不要含生僻字。只输出文本，不含序号，用逗号隔开，不要包含其他解释。"
-          : type === "classical"
-          ? "随机生成一句小学阶段的简短古文（如论语、孟子等名句），去除生僻字，长度10-20字。只输出文本，保留标点符号，不要包含其他解释。"
-          : "随机生成一句小学阶段语文课文短句，长度10-20中文字。只输出文本，保留标点符号，不要包含其他解释。";
-    }
-
-    // 适配 LLM 库需要的环境变量
-    // 优先使用标准变量，如果没有，则尝试从旧变量迁移
-    const llmEnv: LLMEnv = {
-      ...env,
-      // 默认使用 gemini，除非环境变量指定了其他
-      LLM_PROVIDER: env.LLM_PROVIDER || "gemini",
-      // 如果没有配置 GEMINI_MODEL_NAME，给一个默认值
-      GEMINI_MODEL_NAME: env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
-    };
-
-    if (!llmEnv.GEMINI_API_KEY && llmEnv.LLM_PROVIDER === "gemini") {
-      console.warn(
-        "[Worker] No GEMINI_API_KEY or GOOGLE_AI_STUDIO_TOKEN found."
-      );
-      return Response.json({ content: pickLocal() });
-    }
-
-    const llm = createLLM(llmEnv);
-    const textStr = await llm.generateSimple(
-      "你是一个中文教育专家，负责生成适合小学生的拼音练习内容。",
-      prompt
-    );
-    let text = textStr || "";
-
-    if (text) {
-      const out = text.trim().replace(/\s+/g, "");
-      if (!out || out.length < 5) {
-        console.warn("[Worker] Generated content too short or empty:", out);
-        return Response.json({ content: pickLocal() });
-      }
-      const cleanOut = out.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
-      console.log("[Worker] Final cleaned content:", cleanOut);
-      return Response.json({ content: cleanOut.slice(0, 25) });
-    }
-
-    return Response.json({ content: pickLocal() });
+    // 数据库中没有找到内容
+    return Response.json({ error: "未找到练习内容" }, { status: 404 });
   } catch (error) {
     console.error("[Worker] Error:", error);
-    return Response.json({ content: "生成失败，请稍后再试" });
+    return Response.json({ error: "生成失败，请稍后再试" }, { status: 500 });
   }
 }

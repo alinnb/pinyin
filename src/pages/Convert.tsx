@@ -127,8 +127,8 @@ export default function ConvertPage() {
               <Card
                 className={`shadow-md ${
                   error
-                    ? "border-red-200 bg-red-50"
-                    : "border-green-200 bg-green-50"
+                    ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+                    : "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20"
                 }`}
               >
                 <CardHeader className="pb-2">
@@ -150,7 +150,7 @@ export default function ConvertPage() {
                 <CardContent>
                   <div
                     className={`p-4 rounded-md ${
-                      error ? "text-red-700" : "text-green-800 bg-white/50"
+                      error ? "text-red-700 dark:text-red-400" : "text-green-800 dark:text-green-400 bg-white/50 dark:bg-gray-900/50"
                     } whitespace-pre-wrap font-mono text-lg leading-relaxed`}
                   >
                     {error || result}

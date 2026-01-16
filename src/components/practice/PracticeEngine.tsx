@@ -51,10 +51,10 @@ export function PracticeEngine({
             const status = statuses[idx] || "pending";
             const color =
               status === "correct"
-                ? "text-green-600"
+                ? "text-green-600 dark:text-green-400"
                 : status === "wrong"
-                ? "text-red-600"
-                : "text-gray-900";
+                ? "text-red-600 dark:text-red-400"
+                : "text-gray-900 dark:text-gray-100";
             // Merge logic for pinyin display
             const showBuffer = isActive && buffer;
             const showAnswer = !showBuffer && answers[idx];
@@ -64,28 +64,37 @@ export function PracticeEngine({
               ? answers[idx]
               : null;
             const pinyinColor = showBuffer
-              ? "text-gray-500"
+              ? "text-gray-500 dark:text-gray-400"
               : statuses[idx] === "wrong"
-              ? "text-red-600"
-              : "text-gray-700";
+              ? "text-red-600 dark:text-red-400"
+              : "text-gray-700 dark:text-gray-300";
+
+            const statusAnimation = status === "correct" ? "animate-correct" :
+                                   status === "wrong" ? "animate-wrong" :
+                                   isActive ? "animate-active" : "";
 
             return (
               <div
                 key={idx}
-                className={`relative px-2 py-2 rounded ${color} ${
-                  isActive ? "bg-blue-50" : ""
-                }`}
+                className={`relative px-2 py-2 rounded ${color} transition-all duration-300 ${
+                  isActive ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                } ${statusAnimation}`}
+                style={{
+                  transform: status === "correct" || status === "wrong" ? "scale(1.1)" : "scale(1)",
+                }}
               >
                 <span>{ch}</span>
                 {pinyinText && (
                   <span
-                    className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-sm font-mono whitespace-nowrap ${pinyinColor}`}
+                    className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-sm font-mono whitespace-nowrap ${pinyinColor} transition-all duration-200 ${
+                      showBuffer ? "animate-fade-in" : ""
+                    }`}
                   >
                     {pinyinText}
                   </span>
                 )}
                 {isActive && (
-                  <div className="absolute bottom-1 left-2 right-2 h-0.5 bg-blue-400" />
+                  <div className="absolute bottom-1 left-2 right-2 h-0.5 bg-blue-400 dark:bg-blue-500 animate-pulse" />
                 )}
               </div>
             );

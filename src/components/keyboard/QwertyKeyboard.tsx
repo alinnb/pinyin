@@ -9,14 +9,14 @@ type KeyDef = {
 
 const Dual = ({ top, bottom }: { top: string; bottom: string }) => (
   <div className="flex flex-col items-center justify-center leading-none h-full">
-    <span className="text-[10px] text-gray-500">{top}</span>
-    <span className="text-sm font-medium">{bottom}</span>
+    <span className="text-[10px] text-gray-500 dark:text-gray-400">{top}</span>
+    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{bottom}</span>
   </div>
 );
 
 const Single = ({ label }: { label: string }) => (
   <div className="flex items-center justify-center h-full">
-    <span className="text-sm font-medium">{label}</span>
+    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
   </div>
 );
 
@@ -30,7 +30,7 @@ const Special = ({
   align?: "left" | "center" | "right";
 }) => (
   <div
-    className={`flex flex-col h-full justify-center px-1 ${ 
+    className={`flex flex-col h-full justify-center px-1 ${
       align === "left"
         ? "items-start"
         : align === "right"
@@ -38,9 +38,9 @@ const Special = ({
         : "items-center"
     }`}
   >
-    <span className="text-xs font-medium leading-tight">{main}</span>
+    <span className="text-xs font-medium leading-tight text-gray-900 dark:text-gray-100">{main}</span>
     {sub && (
-      <span className="text-[10px] text-gray-500 leading-tight">{sub}</span>
+      <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">{sub}</span>
     )}
   </div>
 );
@@ -197,19 +197,19 @@ export default function QwertyKeyboard() {
   }, []);
 
   return (
-    <div className="mt-8 w-full select-none bg-white p-2 rounded-xl border shadow-sm">
+    <div className="mt-8 w-full select-none bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-300">
       <div className="flex flex-col gap-2">
         {ALL_ROWS.map((row, i) => (
           <div key={i} className="flex gap-1.5 w-full">
             {row.map((k) => (
               <div
                 key={k.code}
-                className={`${ 
+                className={`${
                   k.width
-                } h-12 rounded border flex items-center justify-center transition-all duration-75 ${ 
+                } h-12 rounded border flex items-center justify-center transition-all duration-75 ${
                   pressed[k.code]
                     ? "bg-blue-500 border-blue-600 shadow-inner translate-y-[1px] [&_*]:!text-white"
-                    : "bg-white border-gray-300 shadow-[0_1px_0_rgba(0,0,0,0.1)] hover:border-gray-400"
+                    : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 shadow-[0_1px_0_rgba(0,0,0,0.1)] hover:border-gray-400 dark:hover:border-gray-500"
                 }`}
               >
                 {k.render}

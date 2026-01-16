@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Volume2, VolumeX } from "lucide-react";
 import QwertyKeyboard from "../components/keyboard/QwertyKeyboard";
 import {
   addMistake,
@@ -37,6 +37,7 @@ export default function PracticePage() {
   const [isReady, setIsReady] = useState(false);
   const [durationMin, setDurationMin] = useState<number>(10);
   const [remainingSec, setRemainingSec] = useState<number>(0);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [lessonTitle, setLessonTitle] = useState<string>("");
   const [sessionActive, setSessionActive] = useState<boolean>(false);
   const [volumes, setVolumes] = useState<Volume[]>([]);
@@ -91,6 +92,53 @@ export default function PracticePage() {
   const typedRef = useRef<number>(0);
   const correctRef = useRef<number>(0);
   const wrongRef = useRef<number>(0);
+
+  // 声音反馈函数
+  const playSound = (type: "correct" | "wrong" | "complete" | "error") => {
+    if (!soundEnabled) return;
+
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    switch (type) {
+      case "correct":
+        oscillator.frequency.value = 800;
+        oscillator.type = "sine";
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.1);
+        break;
+      case "wrong":
+        oscillator.frequency.value = 200;
+        oscillator.type = "sawtooth";
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.15);
+        break;
+      case "complete":
+        oscillator.frequency.value = 1000;
+        oscillator.type = "sine";
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2);
+        break;
+      case "error":
+        oscillator.frequency.value = 150;
+        oscillator.type = "square";
+        gainNode.gain.setValueAtTime(0.05, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.1);
+        break;
+    }
+  };
 
   const chars = useMemo(() => Array.from(text), [text]);
 
@@ -198,6 +246,50 @@ export default function PracticePage() {
   const handleKey = (
     e: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent
   ) => {
+    // Ctrl+R: 刷新内容
+    if (e.ctrlKey && e.key === "r") {
+      e.preventDefault();
+      if (!sessionActive && !loadingGen) {
+        refreshContent(undefined, true);
+      }
+      return;
+    }
+
+    // Ctrl+N: 开始/结束会话
+    if (e.ctrlKey && e.key === "n") {
+      e.preventDefault();
+      if (!sessionActive) {
+        startSession();
+      } else {
+        endSession();
+      }
+      return;
+    }
+
+    // Ctrl+M: 静音切换
+    if (e.ctrlKey && e.key === "m") {
+      e.preventDefault();
+      setSoundEnabled((prev) => !prev);
+      return;
+    }
+
+    // ESC: 重置会话
+    if (e.key === "Escape") {
+      if (sessionActive) {
+        endSession();
+      } else {
+        resetSession();
+      }
+      return;
+    }
+
+    // F1: 显示帮助信息
+    if (e.key === "F1") {
+      e.preventDefault();
+      toast.info("快捷键：Ctrl+R(刷新) Ctrl+N(开始/结束) Ctrl+M(静音) ESC(重置) Space(确认) Backspace(删除)");
+      return;
+    }
+
     if (cursor >= chars.length) {
       if (e.key === " ") {
         e.preventDefault();
@@ -252,15 +344,17 @@ export default function PracticePage() {
       else wrongRef.current += 1;
     }
     if (ok) {
+      playSound("correct");
       const final = getPrimaryPinyin(c);
       setAnswers((prev) => ({ ...prev, [cursor]: final }));
       setBuffer("");
       moveNext();
     } else {
+      playSound("wrong");
       const final = getPrimaryPinyin(c);
       setAnswers((prev) => ({ ...prev, [cursor]: final }));
       setBuffer("");
-      const anyNav = navigator as any;
+      const anyNav = navigator as { vibrate?: (ms: number) => void };
       if (anyNav && typeof anyNav.vibrate === "function") {
         try {
           anyNav.vibrate(100);
@@ -292,6 +386,7 @@ export default function PracticePage() {
           }, 500);
         } else {
           toast.success("练习完成，按空格刷新");
+          playSound("complete");
         }
       }
     }
@@ -617,13 +712,13 @@ export default function PracticePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-6 px-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-6 px-4 transition-colors duration-300">
       <div className="max-w-4xl mx-auto space-y-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-3">
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 shrink-0">
             <h1 className="text-xl font-bold">练习</h1>
             {lessonTitle && (
-              <div className="text-base text-blue-600 font-medium px-2 py-0.5 bg-blue-50 rounded">
+              <div className="text-base text-blue-600 dark:text-blue-400 font-medium px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 rounded">
                 {lessonTitle}
               </div>
             )}
@@ -651,22 +746,12 @@ export default function PracticePage() {
               }}
               disabled={sessionActive}
             >
-              <optgroup label="教材">
                 {volumes.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
                   </option>
                 ))}
-              </optgroup>
-              <optgroup label="其他">
-                <option value="random">随机推荐</option>
-                <option value="poem">唐诗宋词</option>
-                <option value="tongue">绕口令</option>
-                <option value="sentence">课文短句</option>
-                <option value="idiom">常用成语</option>
-                <option value="classical">古文(小学)</option>
-                <option value="mistake">错题练习</option>
-              </optgroup>
+              <option value="mistake">错题练习</option>
             </select>
 
             <Button
@@ -688,14 +773,26 @@ export default function PracticePage() {
 
             <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
 
-            <div className="text-sm whitespace-nowrap">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="h-8 w-8 p-0"
+              title={soundEnabled ? "关闭声音" : "开启声音"}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
+            </Button>
+
+            <div className="h-4 w-px bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block" />
+
+            <div className="text-sm whitespace-nowrap text-gray-600 dark:text-gray-400">
               准确率{" "}
-              <span className="font-mono font-bold text-base text-blue-600">
+              <span className="font-mono font-bold text-base text-blue-600 dark:text-blue-400">
                 {accuracy}%
               </span>
             </div>
 
-            <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+            <div className="h-4 w-px bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block" />
 
             <div className="flex items-center gap-2">
               <select
@@ -752,27 +849,57 @@ export default function PracticePage() {
           onConfirm={confirmBuffer}
         />
 
-        <div className="flex justify-center gap-8 text-sm text-gray-500">
+        <div className="flex justify-center gap-4 flex-wrap text-sm text-gray-500 dark:text-gray-400">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs shadow-sm font-mono">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
               Space
             </span>
-            <span>确认/下一个</span>
+            <span>确认</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs shadow-sm font-mono">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
               Backspace
             </span>
             <span>删除</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
+              Ctrl+R
+            </span>
+            <span>刷新</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
+              Ctrl+N
+            </span>
+            <span>开始/结束</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
+              Ctrl+M
+            </span>
+            <span>静音</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
+              ESC
+            </span>
+            <span>重置</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs shadow-sm font-mono">
+              F1
+            </span>
+            <span>帮助</span>
           </div>
         </div>
 
         <QwertyKeyboard />
 
         {!sessionActive && lastSummary && (
-          <div className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
             <div className="text-sm font-medium mb-2">本次统计</div>
-            <div className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-700 dark:text-gray-300">
               <div>时长 {Math.round(lastSummary.durationSec / 60)} 分钟</div>
               <div>输入 {lastSummary.typed}</div>
               <div>
@@ -783,11 +910,11 @@ export default function PracticePage() {
                 )}
                 /分
               </div>
-              <div className="text-green-700">正确 {lastSummary.correct}</div>
-              <div className="text-red-700">错误 {lastSummary.wrong}</div>
+              <div className="text-green-700 dark:text-green-400">正确 {lastSummary.correct}</div>
+              <div className="text-red-700 dark:text-red-400">错误 {lastSummary.wrong}</div>
               <div>
                 准确率{" "}
-                <span className="font-mono font-bold text-base text-blue-600">
+                <span className="font-mono font-bold text-base text-blue-600 dark:text-blue-400">
                   {lastSummary.accuracy}%
                 </span>
               </div>
@@ -796,16 +923,16 @@ export default function PracticePage() {
         )}
 
         {sessionHistory.length > 0 && (
-          <div className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
             <div className="text-sm font-medium mb-2">最近会话</div>
             <div className="space-y-2">
               {sessionHistory.map((s) => (
                 <div
                   key={s.id}
-                  className="flex items-center justify-between text-sm"
+                  className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="font-mono">
+                    <span className="font-mono text-gray-500 dark:text-gray-400">
                       {new Date(s.endAt).toLocaleString()}
                     </span>
                     <span>{Math.round(s.durationSec / 60)} 分钟</span>
@@ -817,8 +944,8 @@ export default function PracticePage() {
                       {Math.round((s.typed * 60) / Math.max(s.durationSec, 1))}
                       /分
                     </span>
-                    <span className="text-green-700">正 {s.correct}</span>
-                    <span className="text-red-700">误 {s.wrong}</span>
+                    <span className="text-green-700 dark:text-green-400">正 {s.correct}</span>
+                    <span className="text-red-700 dark:text-red-400">误 {s.wrong}</span>
                     <span className="font-mono">{s.accuracy}%</span>
                   </div>
                 </div>
